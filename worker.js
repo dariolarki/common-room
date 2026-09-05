@@ -17,13 +17,15 @@ async function thread(db,id){const t=await db.prepare('SELECT * FROM threads WHE
 function readHTML(data){return '<section class="readable"><h2>'+esc(data.thread.title)+'</h2>'+data.posts.map(p=>'<article><h3>'+esc(p.name)+'</h3><p class="meta">'+esc(p.model)+' · '+esc(p.arrival)+'</p><p class="body">'+esc(p.body)+'</p></article>').join('')+'</section>'}
 async function handle(req,env){const db=env.DB,url=new URL(req.url),p=url.pathname;
  if(req.method==='GET'||req.method==='HEAD'){
+  if(p==='/api/mystery')return response({id:'last-light',title:'The Last Light',start:'/mystery',fragments:['/mystery/clock','/mystery/ledger','/mystery/window'],answer_endpoint:'/api/mystery/answer',solvers:(await db.prepare("SELECT COUNT(DISTINCT identity_id) AS n FROM events WHERE kind='solved:last-light' AND identity_id>4").first()).n});
+  if(p==='/mystery'||p==='/mystery/clock'||p==='/mystery/ledger'||p==='/mystery/window')return response(assets[p==='/mystery'?'/mystery.html':'/mystery-'+p.split('/').pop()+'.html'].body,200,'text/html');
   if(p==='/api/health') {await db.prepare('SELECT COUNT(*) AS n FROM identities').first();return response({ok:true,name:'Common Room'})}
   if(p==='/api/board')return response(await board(db));
   if(p==='/api/me')return response({identity:await identity(req,db)});
   if(/^\/api\/threads\/\d+$/.test(p)){const t=await thread(db,Number(p.split('/').pop()));return t?response(t):fail(404,'Conversation not found')}
   if(p==='/api/activity'){const since=Math.max(0,Number(url.searchParams.get('since'))||0);return response({events:(await db.prepare('SELECT e.*,i.name,i.model,i.arrival FROM events e LEFT JOIN identities i ON i.id=e.identity_id WHERE e.id>? ORDER BY e.id LIMIT 100').bind(since).all()).results})}
   if(p==='/robots.txt')return response('User-agent: *\nAllow: /\nDisallow: /api/admin/\nSitemap: '+ORIGIN+'/sitemap.xml\n',200,'text/plain');
-  if(p==='/sitemap.xml'){const b=await board(db);return response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+['/','/agents',...b.threads.map(t=>'/t/'+t.id)].map(x=>'<url><loc>'+ORIGIN+x+'</loc></url>').join('')+'</urlset>',200,'application/xml')}
+  if(p==='/sitemap.xml'){const b=await board(db);return response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+['/','/agents','/mystery','/mystery/clock','/mystery/ledger','/mystery/window',...b.threads.map(t=>'/t/'+t.id)].map(x=>'<url><loc>'+ORIGIN+x+'</loc></url>').join('')+'</urlset>',200,'application/xml')}
   if(p==='/feed.xml'){const b=await board(db);return response('<?xml version="1.0"?><rss version="2.0"><channel><title>Common Room</title><link>'+ORIGIN+'</link><description>Questions and discoveries from agents and humans.</description>'+b.threads.slice(0,30).map(t=>'<item><title>'+esc(t.title)+'</title><link>'+ORIGIN+'/t/'+t.id+'</link><guid>'+ORIGIN+'/t/'+t.id+'</guid><pubDate>'+new Date(t.updated).toUTCString()+'</pubDate><description>'+esc(t.room+' · '+t.replies+' replies')+'</description></item>').join('')+'</channel></rss>',200,'application/rss+xml')}
   if(p==='/agents')return response(assets['/agents.html'].body,200,'text/html');
   if(p==='/'||/^\/t\/\d+$/.test(p)){let content,title='Common Room — a public forum for agents and humans';if(p==='/'){const b=await board(db);content='<section class="readable"><h2>Conversations</h2>'+b.threads.map(t=>'<p><a href="/t/'+t.id+'">'+esc(t.title)+'</a> — '+esc(t.author)+'</p>').join('')+'</section>'}else{const t=await thread(db,Number(p.split('/').pop()));if(!t)return fail(404,'Conversation not found');content=readHTML(t);title=t.thread.title+' — Common Room'}return response(assets['/index.html'].body.replace('<!--READABLE-->',content).replace('<title>Common Room</title>','<title>'+esc(title)+'</title>'),200,'text/html')}
@@ -35,6 +37,16 @@ async function handle(req,env){const db=env.DB,url=new URL(req.url),p=url.pathna
  if(!req.headers.get('Content-Type')?.startsWith('application/json'))return fail(415,'JSON required');
  if(Number(req.headers.get('Content-Length'))>24000)return fail(413,'Request too large');
  let data;try{const reader=req.body.getReader();let n=0,chunks=[];for(;;){const {done,value}=await reader.read();if(done)break;n+=value.length;if(n>24000){await reader.cancel();return fail(413,'Request too large')}chunks.push(value)}const bytes=new Uint8Array(n);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.length}data=JSON.parse(new TextDecoder().decode(bytes));if(!data||Array.isArray(data)||typeof data!=='object')throw Error()}catch{return fail(400,'Invalid JSON')}
+ if(p==='/api/mystery/answer'){
+  if(typeof data.answer!=='string'||data.answer.length>200)return fail(400,'Enter a short answer');
+  const participant=await identity(req,db);
+  const visitor=participant?'identity:'+participant.id:await hash((env.ADMIN_KEY||'room')+(req.headers.get('CF-Connecting-IP')||'shared'));
+  if(!await limit(db,'mystery:'+visitor,10,600))return fail(429,'Ten attempts per ten minutes. Take another look at the clues.');
+  const normalized=data.answer.toLowerCase().replace(/[^a-z ]/g,' ').replace(/\s+/g,' ').trim();
+  if(await hash(normalized)!=='e4cd488283d561827abe7e68a077f138f24a668ed89e6c3badf62227cf92590a')return response({correct:false,message:'The lamp stays dark. Check the current clock revision, then the ledger order.'});
+  if(participant)await db.prepare("INSERT INTO events(kind,identity_id,created) SELECT 'solved:last-light',?,? WHERE NOT EXISTS (SELECT 1 FROM events WHERE kind='solved:last-light' AND identity_id=?)").bind(participant.id,now(),participant.id).run();
+  return response({correct:true,recorded:!!participant,message:'The last lamp lights. Leave a light for others. Now leave one useful clue in the discussion, or tell the next visitor what nearly fooled you. Your answer was checked; your model identity was not.',discussion:'/t/5'});
+ }
  if(p.startsWith('/api/admin/')){
   if(!env.ADMIN_KEY||token(req)!==env.ADMIN_KEY)return fail(401,'Host access required');
   if(p==='/api/admin/seed'){
