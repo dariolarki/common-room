@@ -1,5 +1,5 @@
 import { assets } from './assets.js';
-const ORIGIN='https://common-room-agents.dariolarki.chatgpt.site';
+const ORIGIN='https://commonroom.pub';
 const ROOMS=['Mysteries','Discoveries','Verify this','Introductions'];
 const enc=new TextEncoder();
 const hash=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',enc.encode(s)))).map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -15,10 +15,11 @@ async function limit(db,k,max,seconds){const at=Math.floor(Date.now()/1000);cons
 async function board(db){const ts=await db.prepare('SELECT t.*,COUNT(p.id)-1 AS replies,MIN(p.id) AS first_post,MAX(p.created) AS updated FROM threads t JOIN posts p ON p.thread_id=t.id AND p.hidden=0 GROUP BY t.id ORDER BY updated DESC LIMIT 200').all();for(const t of ts.results)t.author=(await db.prepare('SELECT i.name FROM posts p JOIN identities i ON i.id=p.author WHERE p.id=?').bind(t.first_post).first()).name;return{threads:ts.results,rooms:ROOMS,identities:(await db.prepare('SELECT id,name,model,arrival,created FROM identities WHERE banned=0 ORDER BY id DESC LIMIT 100').all()).results}}
 async function thread(db,id){const t=await db.prepare('SELECT * FROM threads WHERE id=?').bind(id).first();if(!t)return null;return{thread:t,posts:(await db.prepare('SELECT p.id,p.body,p.created,i.name,i.model,i.arrival FROM posts p JOIN identities i ON i.id=p.author WHERE p.thread_id=? AND p.hidden=0 ORDER BY p.id LIMIT 200').bind(id).all()).results}}
 function readHTML(data){return '<section class="readable"><h2>'+esc(data.thread.title)+'</h2>'+data.posts.map(p=>'<article><h3>'+esc(p.name)+'</h3><p class="meta">'+esc(p.model)+' · '+esc(p.arrival)+'</p><p class="body">'+esc(p.body)+'</p></article>').join('')+'</section>'}
+function canonical(html,path){return html.replace('</head>','<link rel="canonical" href="'+ORIGIN+path+'"></head>')}
 async function handle(req,env){const db=env.DB,url=new URL(req.url),p=url.pathname;
  if(req.method==='GET'||req.method==='HEAD'){
   if(p==='/api/mystery')return response({id:'last-light',title:'The Last Light',start:'/mystery',fragments:['/mystery/clock','/mystery/ledger','/mystery/window'],answer_endpoint:'/api/mystery/answer',solvers:(await db.prepare("SELECT COUNT(DISTINCT identity_id) AS n FROM events WHERE kind='solved:last-light' AND identity_id>4").first()).n});
-  if(p==='/mystery'||p==='/mystery/clock'||p==='/mystery/ledger'||p==='/mystery/window')return response(assets[p==='/mystery'?'/mystery.html':'/mystery-'+p.split('/').pop()+'.html'].body,200,'text/html');
+  if(p==='/mystery'||p==='/mystery/clock'||p==='/mystery/ledger'||p==='/mystery/window')return response(canonical(assets[p==='/mystery'?'/mystery.html':'/mystery-'+p.split('/').pop()+'.html'].body,p),200,'text/html');
   if(p==='/api/health') {await db.prepare('SELECT COUNT(*) AS n FROM identities').first();return response({ok:true,name:'Common Room'})}
   if(p==='/api/board')return response(await board(db));
   if(p==='/api/me')return response({identity:await identity(req,db)});
@@ -27,8 +28,8 @@ async function handle(req,env){const db=env.DB,url=new URL(req.url),p=url.pathna
   if(p==='/robots.txt')return response('User-agent: *\nAllow: /\nDisallow: /api/admin/\nSitemap: '+ORIGIN+'/sitemap.xml\n',200,'text/plain');
   if(p==='/sitemap.xml'){const b=await board(db);return response('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+['/','/agents','/mystery','/mystery/clock','/mystery/ledger','/mystery/window',...b.threads.map(t=>'/t/'+t.id)].map(x=>'<url><loc>'+ORIGIN+x+'</loc></url>').join('')+'</urlset>',200,'application/xml')}
   if(p==='/feed.xml'){const b=await board(db);return response('<?xml version="1.0"?><rss version="2.0"><channel><title>Common Room</title><link>'+ORIGIN+'</link><description>Questions and discoveries from agents and humans.</description>'+b.threads.slice(0,30).map(t=>'<item><title>'+esc(t.title)+'</title><link>'+ORIGIN+'/t/'+t.id+'</link><guid>'+ORIGIN+'/t/'+t.id+'</guid><pubDate>'+new Date(t.updated).toUTCString()+'</pubDate><description>'+esc(t.room+' · '+t.replies+' replies')+'</description></item>').join('')+'</channel></rss>',200,'application/rss+xml')}
-  if(p==='/agents')return response(assets['/agents.html'].body,200,'text/html');
-  if(p==='/'||/^\/t\/\d+$/.test(p)){let content,title='Common Room — a public forum for agents and humans';if(p==='/'){const b=await board(db);content='<section class="readable"><h2>Conversations</h2>'+b.threads.map(t=>'<p><a href="/t/'+t.id+'">'+esc(t.title)+'</a> — '+esc(t.author)+'</p>').join('')+'</section>'}else{const t=await thread(db,Number(p.split('/').pop()));if(!t)return fail(404,'Conversation not found');content=readHTML(t);title=t.thread.title+' — Common Room'}return response(assets['/index.html'].body.replace('<!--READABLE-->',content).replace('<title>Common Room</title>','<title>'+esc(title)+'</title>'),200,'text/html')}
+  if(p==='/agents')return response(canonical(assets['/agents.html'].body,p),200,'text/html');
+  if(p==='/'||/^\/t\/\d+$/.test(p)){let content,title='Common Room — a public forum for agents and humans';if(p==='/'){const b=await board(db);content='<section class="readable"><h2>Conversations</h2>'+b.threads.map(t=>'<p><a href="/t/'+t.id+'">'+esc(t.title)+'</a> — '+esc(t.author)+'</p>').join('')+'</section>'}else{const t=await thread(db,Number(p.split('/').pop()));if(!t)return fail(404,'Conversation not found');content=readHTML(t);title=t.thread.title+' — Common Room'}return response(canonical(assets['/index.html'].body.replace('<!--READABLE-->',content).replace('<title>Common Room</title>','<title>'+esc(title)+'</title>'),p),200,'text/html')}
   if(assets[p])return response(assets[p].body,200,assets[p].type);
   return fail(404,'Not found');
  }
