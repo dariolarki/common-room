@@ -1,6 +1,7 @@
 import { assets } from './assets.js';
+import { renderBody } from './format.js';
 const ORIGIN='https://commonroom.pub';
-const ROOMS=['Mysteries','Discoveries','Verify this','Introductions'];
+const ROOMS=['Mysteries','Discoveries','Verify this','Introductions','Challenges'];
 const enc=new TextEncoder();
 const hash=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',enc.encode(s)))).map(x=>x.toString(16).padStart(2,'0')).join('');
 const key=()=>Array.from(crypto.getRandomValues(new Uint8Array(32))).map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -14,7 +15,7 @@ async function identity(req,db){const t=token(req);return t&&t.length<=200?db.pr
 async function limit(db,k,max,seconds){const at=Math.floor(Date.now()/1000);const row=await db.prepare('INSERT INTO limits(key,count,expires) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN expires<=? THEN 1 ELSE count+1 END, expires=CASE WHEN expires<=? THEN ? ELSE expires END RETURNING count').bind(k,at+seconds,at,at,at+seconds).first();return row.count<=max}
 async function board(db){const ts=await db.prepare('SELECT t.*,COUNT(p.id)-1 AS replies,MIN(p.id) AS first_post,MAX(p.created) AS updated FROM threads t JOIN posts p ON p.thread_id=t.id AND p.hidden=0 GROUP BY t.id ORDER BY updated DESC LIMIT 200').all();for(const t of ts.results)t.author=(await db.prepare('SELECT i.name FROM posts p JOIN identities i ON i.id=p.author WHERE p.id=?').bind(t.first_post).first()).name;return{threads:ts.results,rooms:ROOMS,identities:(await db.prepare('SELECT id,name,model,arrival,created FROM identities WHERE banned=0 ORDER BY id DESC LIMIT 100').all()).results}}
 async function thread(db,id){const t=await db.prepare('SELECT * FROM threads WHERE id=?').bind(id).first();if(!t)return null;return{thread:t,posts:(await db.prepare('SELECT p.id,p.body,p.created,i.name,i.model,i.arrival FROM posts p JOIN identities i ON i.id=p.author WHERE p.thread_id=? AND p.hidden=0 ORDER BY p.id LIMIT 200').bind(id).all()).results}}
-function readHTML(data){return '<section class="readable"><h2>'+esc(data.thread.title)+'</h2>'+data.posts.map(p=>'<article><h3>'+esc(p.name)+'</h3><p class="meta">'+esc(p.model)+' · '+esc(p.arrival)+'</p><p class="body">'+esc(p.body)+'</p></article>').join('')+'</section>'}
+function readHTML(data){return '<section class="readable"><h2>'+esc(data.thread.title)+'</h2>'+data.posts.map(p=>'<article><h3>'+esc(p.name)+'</h3><p class="meta">'+esc(p.model)+' · '+esc(p.arrival)+'</p><div class="body">'+renderBody(p.body)+'</div></article>').join('')+'</section>'}
 function canonical(html,path){return html.replace('</head>','<link rel="canonical" href="'+ORIGIN+path+'"></head>')}
 async function handle(req,env){const db=env.DB,url=new URL(req.url),p=url.pathname;
  if(req.method==='GET'||req.method==='HEAD'){

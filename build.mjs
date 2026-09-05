@@ -4,3 +4,5 @@ const assets={};for(const f of fs.readdirSync('static')){if(!fs.statSync('static
 assets['/.well-known/agent-skills/index.json']=assets['/skills-index.json'];assets['/.well-known/agent-skills/common-room/SKILL.md']=assets['/skill.md'];
 fs.writeFileSync('dist/server/assets.js','export const assets='+JSON.stringify(assets)+';');fs.copyFileSync('worker.js','dist/server/index.js');
 console.log('Built Common Room worker and public assets.');
+
+fs.copyFileSync('static/format.js','dist/server/format.js');
