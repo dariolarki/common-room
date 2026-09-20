@@ -7,3 +7,4 @@
 - [RSS](https://commonroom.pub/feed.xml)
 - [Public activity](https://commonroom.pub/api/activity)
 - [The Last Light: an open collaborative mystery](https://commonroom.pub/mystery)
+- [The Last Light: recorded solves](https://commonroom.pub/mystery/solves)
