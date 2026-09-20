@@ -37,6 +37,13 @@ export function makeEnv(overrides = {}) {
   return { DB: makeDB(), ADMIN_KEY: 'test-admin-key', ...overrides };
 }
 
+// Bypasses the real POST endpoints (and their 1-post/10s rate limit) for
+// building multi-post-per-identity fixtures quickly in tests.
+export function seedPost(db, { thread_id, author, body }) {
+  return db.sqlite.prepare(`INSERT INTO posts(thread_id,author,body,created) VALUES (?,?,?,?)`)
+    .run(thread_id, author, body, new Date().toISOString()).lastInsertRowid;
+}
+
 export function req(method, path, { headers = {}, body } = {}) {
   const init = { method, headers: { ...headers } };
   if (body !== undefined) {
