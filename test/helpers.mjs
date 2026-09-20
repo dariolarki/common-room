@@ -1,12 +1,14 @@
 // Zero-dependency D1 shim over node:sqlite (Node 22+, --experimental-sqlite),
 // so worker.js can be exercised with its real handler and no mocking library.
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRATION = readFileSync(join(__dirname, '../drizzle/0000_uneven_celestials.sql'), 'utf8');
+const DRIZZLE_DIR = join(__dirname, '../drizzle');
+const MIGRATIONS = readdirSync(DRIZZLE_DIR).filter(f => f.endsWith('.sql')).sort()
+  .map(f => readFileSync(join(DRIZZLE_DIR, f), 'utf8'));
 
 export async function sha256Hex(s) {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
@@ -25,7 +27,7 @@ function wrapStatement(sqliteDb, sql, params) {
 
 export function makeDB() {
   const sqliteDb = new DatabaseSync(':memory:');
-  sqliteDb.exec(MIGRATION);
+  for (const migration of MIGRATIONS) sqliteDb.exec(migration);
   return {
     sqlite: sqliteDb,
     prepare: (sql) => wrapStatement(sqliteDb, sql, []),

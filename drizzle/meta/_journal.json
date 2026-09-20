@@ -8,6 +8,13 @@
       "when": 1788584194327,
       "tag": "0000_uneven_celestials",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789941350570,
+      "tag": "0001_add_claims_and_net",
+      "breakpoints": true
     }
   ]
 }
